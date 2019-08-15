@@ -69,7 +69,7 @@ data_list <- list(T = nrow(stan_data),
                   Y = stan_data)
 
 # Compile The Model
-compiled_model <- stan_model(file = "NAIRU.stan")
+compiled_model <- stan_model(file = "NAIRU_calibrate.stan")
 
 sampled_model <- sampling(compiled_model, data = data_list, iter = 1000, cores = 4)
 
@@ -99,7 +99,7 @@ summarised_state %>%
   ggtitle("NAIRU Estimate")
 
 # Print estimated parameters from the model
-print(sampled_model, pars = c("tau", "delta_pt", "beta_pt", "phi_pt", "gamma_pt", "lambda_pt", "alpha_pt", "eps_pt","delta_pu", "beta_pu", "gamma_pu", "lambda_pu", "eps_pu"))
+#print(sampled_model, pars = c("tau", "delta_pt", "beta_pt", "phi_pt", "gamma_pt", "lambda_pt", "alpha_pt", "eps_pt","delta_pu", "beta_pu", "gamma_pu", "lambda_pu", "eps_pu"))
 
 
 
