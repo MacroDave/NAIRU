@@ -1,67 +1,85 @@
-library(ggthemes); library(stringr);library(reshape2);library(readabs);library(dplyr); library(ggplot2); library(zoo); library(raustats); library(Quandl); library(rstan)
+library(ggthemes)
+library(reshape2)
+library(readabs)
+library(dplyr)
+library(ggplot2)
+library(zoo)
+library(rstan)
+library(readrba)
+library(lubridate)
+
 options(mc.cores = parallel::detectCores())
 
-library(httr)
-httr::set_config(config(ssl_verifypeer = FALSE))
+#---------------------------------------------------------------------------------------------------------
+		#Download Most Recent ABS and RBA Data
+#---------------------------------------------------------------------------------------------------------
+#Import Data from ABS Website
+abs_5206 <- read_abs(series_id = c("A2304402X", "A2302915V"))
+abs_6202 <- read_abs(series_id = c("A84423043C", "A84423047L"))
+abs_6457 <- read_abs(series_id = c("A2298279F"))
+abs_1364 <- read_abs(series_id = c("A2454521V", "A2454517C"))
+rba_g3 <- read_rba(series_id = c("GBONYLD")) 
+rba_g1 <- read_rba(series_id = c("GCPIOCPMTMQP")) 
 
-#consumer price index - qtly original
-CPI <- read_abs(series_id = "A2325846C") %>%
-  mutate(date = zoo::as.yearmon(date)) %>% 
-  mutate(CPI = 100*log(value/lag(value, 1))) %>% 
-  dplyr::select(date, CPI)
+#---------------------------------------------------------------------------------------------------------		
+#CLEANUP ABS SPREADSHEETS
+#---------------------------------------------------------------------------------------------------------
+#5206.0 Australian National Accounts: National Income, Expenditure and Product
+R_5206 <- abs_5206 %>%
+  filter(series_id %in% c("A2304402X", "A2302915V")) %>% 
+  mutate(date = zoo::as.yearqtr(date)) %>% 
+  dplyr::select(date, series_id, value) 
+R_5206 <- distinct(R_5206,date,series_id, .keep_all= TRUE)
+R_5206 <- dcast(R_5206, date ~ series_id)
+R_5206 <- R_5206 %>%
+  mutate(NULC = A2302915V/A2304402X) %>%
+  mutate(DLNULC = 100*(log(NULC)-log(lag(NULC,1)))) %>%
+  select(date,DLNULC)
 
-#real gdp millions chained dollars - qtly seasonally adj
-GDPA <- read_abs(series_id = "A2304402X") %>%
-  mutate(date = zoo::as.yearmon(date)) %>%   
-  mutate(GDPA = 100*log(value/lag(value, 1))) %>% 
-  dplyr::select(date, GDPA)
+#6457.0 International Trade Price Indexes, Australia
+R_6457 <- abs_6457 %>%
+  filter(series_id %in% c("A2298279F")) %>%
+  mutate(date = zoo::as.yearqtr(date)) %>%
+  mutate(dl4pmcg = 100*(log(value)-log(lag(value,4)))) %>%
+  dplyr::select(date, dl4pmcg)
 
-#Trimmed Mean Inflation - Qtly Growth
-CPIT <- Quandl("RBA/G01_GCPIOCPMTMQP") %>% 
-  mutate(Date = zoo::as.yearmon(Date)) %>% 
-  arrange(Date) %>%
-  rename(date = Date) %>%
-  rename(value = "Quarterly trimmed mean inflation. Units: Per cent; Series ID: GCPIOCPMTMQP") %>%
-  mutate(CPIT = value) %>%
-  dplyr::select(date,CPIT)
+#6202.0 Labour Force, Australia - Monthly
+R_6202 <- abs_6202 %>%
+  filter(series_id %in% c("A84423043C", "A84423047L")) %>%
+  select(date, series_id, value)
+R_6202 <- distinct(R_6202,date,series_id, .keep_all= TRUE)
+R_6202 <- dcast(R_6202, date ~ series_id)
+R_6202 <- R_6202 %>% group_by(date=floor_date(date, "quarter")) %>%
+  summarize(A84423043C=mean(A84423043C), A84423047L=mean(A84423047L)) %>%
+  mutate(date = zoo::as.yearqtr(date))
+R_6202 <- R_6202 %>%
+  mutate(LUR = 100*(1-A84423043C/A84423047L)) %>%
+  select(date, LUR)
 
-#Inflation Expectations - Break-even 10-year inflation rate (converted to qtly)
-CPIE <- Quandl("RBA/G03_GBONYLD") %>% 
-  mutate(Date = zoo::as.yearmon(Date)) %>% 
-  arrange(Date) %>%
-  rename(date = Date) %>%
-  rename(value = "Break-even 10-year inflation rate. Units: Per cent ; Series ID: GBONYLD") %>%
-  mutate(CPIE = ((1+value/100)^(1/4)-1)*100) %>%
-  dplyr::select(date, CPIE)
+#Import RBA Data#
+#Trimmed-Mean Inflation
+R_g1 <- rba_g1 %>%
+  filter(series_id %in% c("GCPIOCPMTMQP")) %>%
+  mutate(date = zoo::as.yearqtr(date)) %>%
+  rename(DLPTM = value) %>%
+  select(date, DLPTM)
 
-#Nominal Unit Labor Costs - Qtly Seasonally Adjusted
-ULC <- read_abs(series_id = "A2433068T") %>%
-  mutate(date = zoo::as.yearmon(date)) %>%   
-  mutate(ULC = 100*log(value/lag(value, 1))) %>% 
-  dplyr::select(date, ULC)
+#Bond-market inflation expectations
+R_g3 <- rba_g3 %>%
+  filter(series_id %in% c("GBONYLD")) %>%
+  mutate(date = zoo::as.yearqtr(date)) %>%
+  mutate(pie_bondq = ((1+value/100)^(1/4)-1)*100) %>%
+  select(date, pie_bondq)
 
-#Unemployment Rate Persons - Monthly Seasonally Adjusted
-UNR <- read_abs(series_id = "A84423050A") %>%
-  mutate(date = as.Date(date)) %>% 
-  mutate(date = zoo::as.yearmon(date)) %>%   
-  mutate(UNR = (value+lag(value,1)+lag(value,2))/3) %>%
-  dplyr::select(date, UNR)
-
-#Import Deflator - Qtly Seasonally Adjusted
-IMPD <- read_abs(series_id = "A2303729J") %>%
-  mutate(date = zoo::as.yearmon(date)) %>% 
-  mutate(IMPD = 100*log(value/lag(value, 4))) %>% 
-  dplyr::select(date, IMPD)
-
-# Join series together, and set missing values to -999 (Stan doesn't like NAs)
-full_data <- list(CPI, GDPA, ULC, IMPD, CPIT, CPIE, UNR) %>%
+NAIRU_data <- list(R_5206, R_6457, R_6202, R_g1, R_g3) %>%
   Reduce(function(dtf1,dtf2) left_join(dtf1,dtf2,by="date"), .)
 
 #Pick Sample
-est_data <- subset(full_data, date>"June 1986")
+est_data <- NAIRU_data %>%
+  filter(date>"1986q2" & date<"2020q1")
 
 # Subset Data for Stan
-stan_data <- est_data[-nrow(est_data),-1]
+stan_data <- est_data[,-1]
 
 # run model ---------------------------------------------------------------
 data_list <- list(T = nrow(stan_data),
@@ -69,9 +87,9 @@ data_list <- list(T = nrow(stan_data),
                   Y = stan_data)
 
 # Compile The Model
-compiled_model <- stan_model(file = "NAIRU.stan")
+compiled_model <- stan_model(file = "NAIRU_est.stan")
 
-sampled_model <- sampling(compiled_model, data = data_list, iter = 1000, cores = 4)
+sampled_model <- sampling(compiled_model, data = data_list, iter = 2000, control = list(max_treedepth = 15, adapt_delta = 0.99))
 
 summarised_state <- as.data.frame(sampled_model) %>% 
   select(contains("NAIRU")) %>%
@@ -81,20 +99,16 @@ summarised_state <- as.data.frame(sampled_model) %>%
             lowera = quantile(value, 0.05),
             uppera = quantile(value, 0.95),
             lowerb = quantile(value, 0.15),
-            upperb = quantile(value, 0.85)) 
-
-summarised_state$date<-seq(as.Date("1986/12/1"), as.Date("2019/06/1"), by = "quarter")
-summarised_state <- summarised_state %>%
-  mutate(date = zoo::as.yearmon(date))
-
-UR <- full_data[,-(2:7)]
-summarised_state <- left_join(summarised_state,UR,by="date")
+            upperb = quantile(value, 0.85)) %>%
+  mutate(date = as.Date(est_data$date)) %>%
+  mutate(date = zoo::as.yearqtr(date)) %>%
+  mutate(LUR = est_data$LUR)
 
 summarised_state %>% 
   ggplot(aes(x = date)) +
   geom_ribbon(aes(ymin = lowera, ymax = uppera), fill = "orange", alpha = 0.3) +
   geom_line(aes(y = median), colour="red") +
-  geom_line(aes(y = UNR)) +
+  geom_line(aes(y = LUR)) +
   ggthemes::theme_economist() +
   ggtitle("NAIRU Estimate")
 
