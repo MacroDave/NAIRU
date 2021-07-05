@@ -7,8 +7,11 @@ library(zoo)
 library(rstan)
 library(readrba)
 library(lubridate)
+library(readr)
 
 options(mc.cores = parallel::detectCores())
+
+setwd("C:\\Users\\wb398198\\Documents\\NAIRU_STAN")
 
 #---------------------------------------------------------------------------------------------------------
 		#Download Most Recent ABS and RBA Data
@@ -71,7 +74,14 @@ R_g3 <- rba_g3 %>%
   mutate(pie_bondq = ((1+value/100)^(1/4)-1)*100) %>%
   select(date, pie_bondq)
 
-NAIRU_data <- list(R_5206, R_6457, R_6202, R_g1, R_g3) %>%
+#RBA inflation expectations
+myfile <- "https://raw.githubusercontent.com/MacroDave/NAIRU/master/PIE_RBAQ.CSV"
+pie_rbaq <- read_csv(myfile)
+pie_rbaq <- pie_rbaq %>%
+  rename(date=OBS) %>%
+  mutate(date = zoo::as.yearqtr(date))
+
+NAIRU_data <- list(R_5206, R_6457, R_6202, R_g1, R_g3, pie_rbaq) %>%
   Reduce(function(dtf1,dtf2) left_join(dtf1,dtf2,by="date"), .)
 
 #Pick Sample
@@ -87,9 +97,10 @@ data_list <- list(T = nrow(stan_data),
                   Y = stan_data)
 
 # Compile The Model
-compiled_model <- stan_model(file = "NAIRU_est.stan")
+compiled_model <- stan_model(file = "NAIRU_calibrate_vec.stan")
 
-sampled_model <- sampling(compiled_model, data = data_list, iter = 2000, control = list(max_treedepth = 15, adapt_delta = 0.99))
+#sampled_model <- sampling(compiled_model, data = data_list, iter = 2000, control = list(max_treedepth = 15, adapt_delta = 0.99))
+sampled_model <- sampling(compiled_model, data = data_list, chains=4, iter = 4000, control = list(max_treedepth = 15))
 
 summarised_state <- as.data.frame(sampled_model) %>% 
   select(contains("NAIRU")) %>%
@@ -112,8 +123,6 @@ summarised_state %>%
   ggthemes::theme_economist() +
   ggtitle("NAIRU Estimate")
 
-# Print estimated parameters from the model
-print(sampled_model, pars = c("tau", "delta_pt", "beta_pt", "phi_pt", "gamma_pt", "lambda_pt", "alpha_pt", "eps_pt","delta_pu", "beta_pu", "gamma_pu", "lambda_pu", "eps_pu"))
+write.csv(summarised_state,file = "nairu.csv")
 
-
-
+print(sampled_model, pars = c("tau", "eps_pu", "gamma_pu", "beta_pu", "delta_pu", "lambda_pu", "eps_pt", "gamma_pt", "beta_pt", "delta_pt", "lambda_pt"))
