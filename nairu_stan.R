@@ -99,7 +99,6 @@ data_list <- list(T = nrow(stan_data),
 # Compile The Model
 compiled_model <- stan_model(file = "NAIRU_calibrate_vec.stan")
 
-#sampled_model <- sampling(compiled_model, data = data_list, iter = 2000, control = list(max_treedepth = 15, adapt_delta = 0.99))
 sampled_model <- sampling(compiled_model, data = data_list, chains=4, iter = 4000, control = list(max_treedepth = 15))
 
 summarised_state <- as.data.frame(sampled_model) %>% 
@@ -122,7 +121,5 @@ summarised_state %>%
   geom_line(aes(y = LUR)) +
   ggthemes::theme_economist() +
   ggtitle("NAIRU Estimate")
-
-write.csv(summarised_state,file = "nairu.csv")
 
 print(sampled_model, pars = c("tau", "eps_pu", "gamma_pu", "beta_pu", "delta_pu", "lambda_pu", "eps_pt", "gamma_pt", "beta_pt", "delta_pt", "lambda_pt"))
